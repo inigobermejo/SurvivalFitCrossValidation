@@ -3,6 +3,28 @@ library(flexsurv)
 library(readxl)
 library(tidyverse)
 
+df_seer_selected <- read.csv('seer_selected.csv')
+
+
+df_seer_breast     <- df_seer_selected %>%  subset(Site.recode.ICD.O.3.WHO.2008 == 'Breast')
+df_seer_pancreas   <- df_seer_selected %>%  subset(Site.recode.ICD.O.3.WHO.2008 == 'Pancreas')
+df_seer_colorectal <- df_seer_selected %>%  subset(Site.recode.ICD.O.3.WHO.2008 %in% c('Ascending Colon',
+                                                                                       'Cecum',
+                                                                                       'Hepatic Flexure',
+                                                                                       'Rectosigmoid Junction',
+                                                                                       'Sigmoid Colon',
+                                                                                       'Splenic Flexure',
+                                                                                       'Transverse Colon',
+                                                                                       'Descending Colon',
+                                                                                       'Rectum'))
+df_seer_lung       <- df_seer_selected %>%  subset(Site.recode.ICD.O.3.WHO.2008 == 'Lung and Bronchus')
+df_seer_SCLC       <- df_seer_lung     %>%  subset(Histologic.Type.ICD.O.3 %in% c("8041", "8042", "8043", "8044", "8045"))
+df_seer_NSCLC      <- df_seer_lung     %>%  subset(!Histologic.Type.ICD.O.3 %in% c("8041", "8042", "8043", "8044", "8045"))
+
+KM.seer_pancreas <- survfit(Surv(Survival.months, status) ~ 1, data = df_seer_pancreas)
+plot(KM.seer_pancreas, conf.int= T, mark.time= T, xlim=c(0,300))
+
+
 # Breast cancer data sets used in Royston and Altman (2013)
 # German Breast Cancer Study Group
 nrow(gbsg)
@@ -70,17 +92,11 @@ df_tcga_gbm <- df_tcga_gbm[df_tcga_gbm$OS.time>0,]
 KM.tcga_gbm <- survfit(Surv(OS.time, ifelse(vital_status == 'Dead', 1,0)) ~ 1, data = df_tcga_gbm)
 plot(KM.tcga_gbm, conf.int= T, mark.time= T)
 
-#colnames(df_tcga)
-#seer.breast <- read.csv('SEER Breast Cancer Dataset .csv')
-#KM.seer <- survfit(Surv(Survival.Months, ifelse(Status == 'Dead', 1,0)) ~ 1, data = seer.breast)
-#plot(KM.seer, conf.int= T, mark.time= T)
-
 sample_censor <- function(df, time = 'time', status = 'status', n = 250, cutoff = 0.5)
 {
   df$time   <-   df[[time]]  
   df$status <-   df[[status]]
   df_selected <- df[sample(nrow(df),n),]
-  browser()
   KM.df <- survfit(Surv(time, status) ~ 1, data = df_selected)
   if(!is.infinite(min(which(KM.df$surv < cutoff))))
   {
@@ -99,10 +115,10 @@ surv_fit <- function (KM.data, time = 'time', status = 'status')
   fit.llogis    <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "llogis" )       # fit model with loglogistic distribution
   fit.weib      <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "weibull")       # fit model with Weibull distribution
   fit.lnorm     <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "lnorm"  )       # fit model with lognormal distribution
-  fit.gamma     <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gamma"  )       # fit model with gamma distribution 
-  fit.exp       <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "exp"    )       # fit model with exponential distribution
-  fit.gompertz  <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gompertz", inits=c(-1, 1/mean(KM.data$time)))    # fit model with gompertz  
-  fit.gengamma  <- flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gengamma"  )       # fit model with generalized gamma distribution 
+  fit.gamma     <- tryCatch(flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gamma")   , error = function(e) NULL) # fit model with gamma distribution 
+  fit.exp       <- tryCatch(flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "exp")     , error = function(e) NULL)       # fit model with exponential distribution
+  fit.gompertz  <- tryCatch(flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gompertz" , inits=c(-1, 1/mean(KM.data$time))) , error = function(e) NULL)    # fit model with gompertz  
+  fit.gengamma  <- tryCatch(flexsurvreg(Surv(time, status) ~ 1, data = KM.data, dist = "gengamma"), error = function(e) NULL)       # fit model with generalized gamma distribution 
   
   spline_model_k_1        <- tryCatch(flexsurvspline(Surv(time, status) ~ 1, data = KM.data, k = 1) , error = function(e) NULL)
   spline_model_k_2        <- tryCatch(flexsurvspline(Surv(time, status) ~ 1, data = KM.data, k = 2) , error = function(e) NULL)
@@ -130,10 +146,10 @@ surv_fit <- function (KM.data, time = 'time', status = 'status')
   aic <- c(    AIC(fit.llogis),                                         
                AIC(fit.weib), 
                AIC(fit.lnorm), 
-               AIC(fit.gamma),
-               AIC(fit.exp),
-               AIC(fit.gompertz),
-               AIC(fit.gengamma),
+               tryCatch(AIC(fit.gamma),               error = function(e) Inf),
+               tryCatch(AIC(fit.exp),                 error = function(e) Inf),
+               tryCatch(AIC(fit.gompertz),            error = function(e) Inf),
+               tryCatch(AIC(fit.gengamma),            error = function(e) Inf),
                tryCatch(AIC(spline_model_k_1),        error = function(e) Inf),
                tryCatch(AIC(spline_model_k_2),        error = function(e) Inf),
                tryCatch(AIC(spline_model_k_3),        error = function(e) Inf),
@@ -153,10 +169,10 @@ surv_fit <- function (KM.data, time = 'time', status = 'status')
   bic <- c(    BIC(fit.llogis),                                         
                BIC(fit.weib), 
                BIC(fit.lnorm), 
-               BIC(fit.gamma),
-               BIC(fit.exp),
-               BIC(fit.gompertz),
-               BIC(fit.gengamma),
+               tryCatch(BIC(fit.gamma),               error = function(e) Inf),
+               tryCatch(BIC(fit.exp),                 error = function(e) Inf),
+               tryCatch(BIC(fit.gompertz),            error = function(e) Inf),
+               tryCatch(BIC(fit.gengamma),            error = function(e) Inf),
                tryCatch(BIC(spline_model_k_1),        error = function(e) Inf),
                tryCatch(BIC(spline_model_k_2),        error = function(e) Inf),
                tryCatch(BIC(spline_model_k_3),        error = function(e) Inf),
@@ -218,7 +234,7 @@ assess_fit <- function(models, data)
     model <- models[[i]]
     if(is.null(model))
     {
-      print(paste0("Warning: Model " ,i, " is null"))
+      #print(paste0("Warning: Model " ,i, " is null"))
       metrics$aic[i] <- Inf
       metrics$bic[i] <- Inf
       
@@ -332,15 +348,15 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
     
     sampling_results[[i]] <- list(cv = results_cv_avg, trad = results_trad$Metrics)
 
-    print(paste0(i,": AIC",
-                 ": full:", best_model_name_aic,
-                 "; trad:", best_model_name_trad_aic[i], 
-                 "; cv:",   best_model_name_cv_aic[i], 
-                 "; BIC:",  best_model_name_bic,
-                 "; trad:", best_model_name_trad_bic[i], 
-                 "; cv:",   best_model_name_cv_bic[i]))
+    # print(paste0(i,": AIC",
+    #              ": full:", best_model_name_aic,
+    #              "; trad:", best_model_name_trad_aic[i], 
+    #              "; cv:",   best_model_name_cv_aic[i], 
+    #              "; BIC:",  best_model_name_bic,
+    #              "; trad:", best_model_name_trad_bic[i], 
+    #              "; cv:",   best_model_name_cv_bic[i]))
     
-    print(paste0(i,": n:", n, ";k:", k, "; AIC",
+    print(paste0(i, ": n:", n, ";k:", k, "; AIC",
                  ": trad:", round(mean(abs(rmst_trad_aic - rmst_best_aic_full)), 2),
                  "; cv:",   round(mean(abs(rmst_cv_aic   - rmst_best_aic_full)), 2), 
                  "; BIC",
@@ -353,8 +369,12 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
   error_bic_trad <-  mean(abs(rmst_trad_bic - rmst_best_bic_full))
   error_bic_cv   <-  mean(abs(rmst_cv_bic - rmst_best_bic_full))
   
+   
+   df_rmst_all           <- as.data.frame(do.call(rbind, sample_rmst))
+   colnames(df_rmst_all) <- results_full$Modelnames
+  
   return(list(metrics                  = sampling_results,
-              rmst                     = sample_rmst,
+              rmst                     = df_rmst_all,
               rmst_best_aic_full       = rmst_best_aic_full, 
               rmst_best_bic_full       = rmst_best_bic_full, 
               rmst_trad_aic            = rmst_trad_aic, 
@@ -374,42 +394,57 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
 
 process_datasets <- function(n = 250, m = 100, k = 5, cutoff = 0.5)
 {
+  print("------------------- SEER - Breast")
+  results_seer_breast     <- process_dataset(df_seer_breast,     time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  print("------------------- SEER - Pancreas") 
+  results_seer_pancreas   <- process_dataset(df_seer_pancreas,   time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  print("------------------- SEER - Colorectal")
+  results_seer_colorectal <- process_dataset(df_seer_colorectal, time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  print("------------------- SEER - SCLC")
+  results_seer_sclc       <- process_dataset(df_seer_SCLC,       time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  print("------------------- SEER - NSCLC")
+  results_seer_nsclc      <- process_dataset(df_seer_NSCLC,      time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- gbsg")
-  results_gbsg       <- process_dataset(gbsg,          time = 'rfstime', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_gbsg            <- process_dataset(gbsg,               time = 'rfstime', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- mgus2")
-  results_mgus2      <- process_dataset(mgus2,         time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_mgus2           <- process_dataset(mgus2,              time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- myeloma")
-  results_myeloma    <- process_dataset(myeloma,       time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_myeloma         <- process_dataset(myeloma,            time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- rotterdam")
-  results_rotterdam  <- process_dataset(rotterdam,     time = 'dtime',   status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_rotterdam       <- process_dataset(rotterdam,          time = 'dtime',   status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- transplant")
-  results_transplant <- process_dataset(df_transplant, time = 'futime',  status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_transplant      <- process_dataset(df_transplant,      time = 'futime',  status = 'status', m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- ovarian")
-  results_ovarian    <- process_dataset(data.ovarian,  time = 'time',    status = 'event' , m = m, n = n, k = k, cutoff = cutoff)
+  results_ovarian         <- process_dataset(data.ovarian,       time = 'time',    status = 'event' , m = m, n = n, k = k, cutoff = cutoff)
   print("------------------- TCGA GBM")
-  results_tcga_gbm   <- process_dataset(df_tcga_gbm,   time = 'OS.time', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_tcga_gbm        <- process_dataset(df_tcga_gbm,        time = 'OS.time', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
   
-  return(list(gbsg = results_gbsg,
-              mgus2 = results_mgus2,
-              myeloma = results_myeloma,
-              rotterdam = results_rotterdam,
-              transplant = results_transplant,
-              ovarian = results_ovarian,
-              tcga_gbm = results_tcga_gbm))
+  return(list(seer_breast     = results_seer_breast,
+              seer_pancreas   = results_seer_pancreas,
+              seer_colorectal = results_seer_colorectal,
+              seer_nsclc      = results_seer_nsclc,
+              seer_sclc       = results_seer_sclc,
+              gbsg            = results_gbsg,
+              mgus2           = results_mgus2,
+              myeloma         = results_myeloma,
+              rotterdam       = results_rotterdam,
+              transplant      = results_transplant,
+              ovarian         = results_ovarian,
+              tcga_gbm        = results_tcga_gbm))
   
 }
 
-results_n_150_k_10 <- process_datasets(n = 150, k = 10)
-saveRDS(results_n_150_k_10, file = paste0('results_n_150_k_10', '.rds'))
 results_n_250_k_10 <-process_datasets(n = 250, k = 10)
 saveRDS(results_n_250_k_10, file = paste0('results_n_250_k_10', '.rds'))
+results_n_150_k_10 <- process_datasets(n = 150, k = 10)
+saveRDS(results_n_150_k_10, file = paste0('results_n_150_k_10', '.rds'))
 results_n_350_k_10 <- process_datasets(n = 350, k = 10)
 saveRDS(results_n_350_k_10, file = paste0('results_n_350_k_10', '.rds'))
 
-results_n_250_k_10 <-process_datasets(n = 250, k = 10, cutoff = 0.4)
-saveRDS(results_n_250_k_10, file = paste0('results_n_250_k_10_cutoff_0.4', '.rds'))
-results_n_250_k_10 <-process_datasets(n = 250, k = 10, cutoff = 0.3)
-saveRDS(results_n_250_k_10, file = paste0('results_n_250_k_10_cutoff_0.3', '.rds'))
+results_n_250_k_10_co_04 <-process_datasets(n = 250, k = 10, cutoff = 0.4)
+saveRDS(results_n_250_k_10_co_04, file = paste0('results_n_250_k_10_cutoff_0.4', '.rds'))
+results_n_250_k_10_co_03 <-process_datasets(n = 250, k = 10, cutoff = 0.3)
+saveRDS(results_n_250_k_10_co_03, file = paste0('results_n_250_k_10_cutoff_0.3', '.rds'))
 
 results_n_150_k_5 <- process_datasets(n = 150, k = 5)
 saveRDS(results_n_150_k_5, file = paste0('results_n_150_k_5', '.rds'))
