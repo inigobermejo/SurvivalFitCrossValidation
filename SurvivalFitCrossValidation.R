@@ -3,6 +3,10 @@ library(flexsurv)
 library(readxl)
 library(tidyverse)
 
+source('~/Github/SurvivalFitCrossValidation/Bootstrapped_Survival_Curves_Comparison.R')
+
+setwd('~/Inigo/SurvivalFitCrossValidation')
+
 df_seer_selected <- read.csv('seer_selected.csv')
 
 
@@ -98,6 +102,7 @@ sample_censor <- function(df, time = 'time', status = 'status', n = 250, cutoff 
   df$status <-   df[[status]]
   df_selected <- df[sample(nrow(df),n),]
   KM.df <- survfit(Surv(time, status) ~ 1, data = df_selected)
+  # Unless the cutoff is never crossed, censor the samples that go beyond the censoring time
   if(!is.infinite(min(which(KM.df$surv < cutoff))))
   {
     time_censor <- KM.df$time[min(which(KM.df$surv < cutoff))]
@@ -294,9 +299,11 @@ plot_KMs<-function(df, time = 'time', status = 'status', n = 250, k = 5, cv = TR
   
 }
 
-process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 100, k = 5, cutoff = 0.5)
+process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 100, k = 5, cutoff = 0.5, name = "")
 {
   max_time = max(df[, time])
+  
+  KM.fit <- survfit(Surv(df[[time]], df[[status]]) ~ 1)
 
   results_full <- surv_fit(df, time, status)
   best_model_name_aic <- results_full$Modelnames[which.min(results_full$Metrics$aic)]
@@ -318,13 +325,21 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
   best_model_name_trad_bic <- c()
   best_model_name_cv_aic <- c()
   best_model_name_cv_bic <- c()
+  simulated_kms <- list()
+  best_model_survival_times_trad_aic <- list()
+  best_model_survival_times_trad_bic <- list()
+  best_model_survival_times_cv_aic <- list()
+  best_model_survival_times_cv_bic <- list()
   
   for(i in 1:m)
   {
     df_sample        <- sample_censor(df, time, status, n, cutoff)
     results_trad     <- surv_fit(df_sample)
     sample_rmst[[i]] <- sapply(results_trad$Models, function(x){ return(tryCatch(summary(x, type='rmst', t = max_time)[[1]]$est, error = function(e) NA))})
-
+    KM.sample <- survfit(Surv(df_sample[[time]], df_sample[[status]]) ~ 1)
+    simulated_kms[[i]] <- summary(KM.sample, type = "survival", t = seq(0, max_time, length.out = 50))$surv
+    
+    # Traditional
     best_model_name_trad_aic[i]   <- results_trad$Modelnames[which.min(results_trad$Metrics$aic)]
     best_model_name_trad_bic[i]   <- results_trad$Modelnames[which.min(results_trad$Metrics$bic)]
     
@@ -334,6 +349,10 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
     rmst_trad_aic[i] <- summary(best_model_aic, type='rmst', t = max_time)[[1]]$est
     rmst_trad_bic[i] <- summary(best_model_bic, type='rmst', t = max_time)[[1]]$est
     
+    best_model_survival_times_trad_aic[[i]] <- summary(best_model_aic, type = "survival", t = seq(0, max_time, length.out = 100))[[1]]$est
+    best_model_survival_times_trad_bic[[i]] <- summary(best_model_bic, type = "survival", t = seq(0, max_time, length.out = 100))[[1]]$est
+
+    # CV
     results_cv       <- cross_validation(df_sample, k = k)
     results_cv_avg   <- Reduce("+", results_cv) / length(results_cv)
     
@@ -347,6 +366,9 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
     rmst_cv_bic[i]   <- summary(best_model_bic, type='rmst', t = max_time)[[1]]$est
     
     sampling_results[[i]] <- list(cv = results_cv_avg, trad = results_trad$Metrics)
+    
+    best_model_survival_times_cv_aic[[i]]   <- summary(best_model_aic, type = "survival", t = seq(0, max_time, length.out = 100))[[1]]$est
+    best_model_survival_times_cv_bic[[i]]   <- summary(best_model_bic, type = "survival", t = seq(0, max_time, length.out = 100))[[1]]$est
 
     # print(paste0(i,": AIC",
     #              ": full:", best_model_name_aic,
@@ -363,6 +385,9 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
                  ": trad:", round(mean(abs(rmst_trad_bic - rmst_best_bic_full)), 2), 
                  "; cv:",   round(mean(abs(rmst_cv_bic   - rmst_best_bic_full)), 2)))
   }
+  
+  ggsave(paste0("plot_KM_AIC_", name, "_", n, "_", k ,".png"), plot = boostrapped_survival_curves_comparison(KM.fit, simulated_kms, best_model_survival_times_trad_aic, best_model_survival_times_cv_aic), width = 8, height = 4, dpi = 300)
+  ggsave(paste0("plot_KM_BIC_", name, "_", n, "_", k ,".png"), plot = boostrapped_survival_curves_comparison(KM.fit, simulated_kms, best_model_survival_times_trad_bic, best_model_survival_times_cv_bic), width = 8, height = 4, dpi = 300)
   
   error_aic_trad <-  mean(abs(rmst_trad_aic - rmst_best_aic_full))
   error_aic_cv   <-  mean(abs(rmst_cv_aic - rmst_best_aic_full))
@@ -392,32 +417,32 @@ process_dataset <- function(df, time = 'time', status = 'status', n = 250, m = 1
 }
 
 
-process_datasets <- function(n = 250, m = 100, k = 5, cutoff = 0.5)
+process_datasets <- function(n = 250, m = 100, k = 10, cutoff = 0.5)
 {
   print("------------------- SEER - Breast")
-  results_seer_breast     <- process_dataset(df_seer_breast,     time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_seer_breast     <- process_dataset(df_seer_breast,     time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "SEER - Breast")
   print("------------------- SEER - Pancreas") 
-  results_seer_pancreas   <- process_dataset(df_seer_pancreas,   time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_seer_pancreas   <- process_dataset(df_seer_pancreas,   time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "SEER - Pancreas")
   print("------------------- SEER - Colorectal")
-  results_seer_colorectal <- process_dataset(df_seer_colorectal, time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_seer_colorectal <- process_dataset(df_seer_colorectal, time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "SEER - Colorectal")
   print("------------------- SEER - SCLC")
-  results_seer_sclc       <- process_dataset(df_seer_SCLC,       time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_seer_sclc       <- process_dataset(df_seer_SCLC,       time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "SEER - SCLC")
   print("------------------- SEER - NSCLC")
-  results_seer_nsclc      <- process_dataset(df_seer_NSCLC,      time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_seer_nsclc      <- process_dataset(df_seer_NSCLC,      time = 'Survival.months', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "SEER - NSCLC")
   print("------------------- gbsg")
-  results_gbsg            <- process_dataset(gbsg,               time = 'rfstime', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_gbsg            <- process_dataset(gbsg,               time = 'rfstime', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "GBSG")
   print("------------------- mgus2")
-  results_mgus2           <- process_dataset(mgus2,              time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_mgus2           <- process_dataset(mgus2,              time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff, name = "MGUS2")
   print("------------------- myeloma")
-  results_myeloma         <- process_dataset(myeloma,            time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_myeloma         <- process_dataset(myeloma,            time = 'futime',  status = 'death' , m = m, n = n, k = k, cutoff = cutoff, name = "Myeloma")
   print("------------------- rotterdam")
-  results_rotterdam       <- process_dataset(rotterdam,          time = 'dtime',   status = 'death' , m = m, n = n, k = k, cutoff = cutoff)
+  results_rotterdam       <- process_dataset(rotterdam,          time = 'dtime',   status = 'death' , m = m, n = n, k = k, cutoff = cutoff, name = "Rotterdam")
   print("------------------- transplant")
-  results_transplant      <- process_dataset(df_transplant,      time = 'futime',  status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_transplant      <- process_dataset(df_transplant,      time = 'futime',  status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "Transplant")
   print("------------------- ovarian")
-  results_ovarian         <- process_dataset(data.ovarian,       time = 'time',    status = 'event' , m = m, n = n, k = k, cutoff = cutoff)
+  results_ovarian         <- process_dataset(data.ovarian,       time = 'time',    status = 'event' , m = m, n = n, k = k, cutoff = cutoff, name = "Ovarian")
   print("------------------- TCGA GBM")
-  results_tcga_gbm        <- process_dataset(df_tcga_gbm,        time = 'OS.time', status = 'status', m = m, n = n, k = k, cutoff = cutoff)
+  results_tcga_gbm        <- process_dataset(df_tcga_gbm,        time = 'OS.time', status = 'status', m = m, n = n, k = k, cutoff = cutoff, name = "TGCA GBM")
   
   return(list(seer_breast     = results_seer_breast,
               seer_pancreas   = results_seer_pancreas,
