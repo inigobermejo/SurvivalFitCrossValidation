@@ -3,11 +3,9 @@ library(flexsurv)
 library(readxl)
 library(tidyverse)
 
-source('~/Github/SurvivalFitCrossValidation/Bootstrapped_Survival_Curves_Comparison.R')
+source('Bootstrapped_Survival_Curves_Comparison.R')
 
-setwd('~/Inigo/SurvivalFitCrossValidation')
-
-df_seer_selected <- read.csv('seer_selected.csv')
+df_seer_selected <- read.csv('data/seer_selected.csv')
 
 
 df_seer_breast     <- df_seer_selected %>%  subset(Site.recode.ICD.O.3.WHO.2008 == 'Breast')
@@ -76,9 +74,7 @@ df_transplant <- df_transplant[df_transplant$futime<1200,]
 KM.transplant <- survfit(Surv(futime, status) ~ 1, data = df_transplant)
 plot(KM.transplant, conf.int= T, mark.time= T)
 
-setwd("~/Inigo/SurvivalFitCrossValidation")
-
-data.ovarian <- read.csv('dataOvarian1.csv')
+data.ovarian <- read.csv('data/dataOvarian1.csv')
 data.ovarian <- data.ovarian[data.ovarian$time > 0,]
 colnames(data.ovarian)
 nrow(data.ovarian)
@@ -86,8 +82,7 @@ KM.data.ovarian <- survfit(Surv(time, event) ~ 1, data = data.ovarian)
 plot(KM.data.ovarian, conf.int= T, mark.time= T)
 
 
-setwd("~/Inigo/SurvivalFitCrossValidation")
-df_tcga <- readxl::read_excel("TCGA-CDR-SupplementalTableS1.xlsx", sheet = 'TCGA-CDR')
+df_tcga <- readxl::read_excel("data/TCGA-CDR-SupplementalTableS1.xlsx", sheet = 'TCGA-CDR')
 
 df_tcga_gbm <- df_tcga[df_tcga$type=='GBM',]
 df_tcga_gbm$status <- ifelse(df_tcga_gbm$vital_status == 'Dead', 1,0)
