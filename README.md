@@ -3,6 +3,7 @@
 ## Authors
 
 Inigo Bermejo, Data Science Institute (DSI), Hasselt University, Diepenbeek, Belgium
+
 Sabine Grimm,  Klinische Epidemiologie en Medical Technology Assessment (KEMTA), Maastricht University Medical Centre (MUMC+), Maastricht, Limburg, Netherlands
 
 ## Background
